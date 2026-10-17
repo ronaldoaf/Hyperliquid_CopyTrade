@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths: [.github/workflows/test-ssh.yml]
 
+env:
+  VPS_HOST: 217.217.251.30
+
 jobs:
   ssh:
     runs-on: ubuntu-latest
@@ -19,9 +22,9 @@ jobs:
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_vps
           chmod 600 ~/.ssh/id_vps
           echo "Testando a porta 22..."
-          timeout 10 bash -c 'echo > /dev/tcp/217.217.252.30/22' && echo "porta 22 aberta" || echo "porta 22 inacessivel a partir do GitHub"
-          ssh-keyscan -T 15 -H 217.217.252.30 >> ~/.ssh/known_hosts || { echo "ssh-keyscan nao obteve chave do host"; exit 1; }
+          timeout 10 bash -c 'echo > /dev/tcp/$VPS_HOST/22' && echo "porta 22 aberta" || echo "porta 22 inacessivel a partir do GitHub"
+          ssh-keyscan -T 15 -H $VPS_HOST >> ~/.ssh/known_hosts || { echo "ssh-keyscan nao obteve chave do host"; exit 1; }
       - name: Rodar comandos de leitura
         run: |
-          ssh -i ~/.ssh/id_vps -o BatchMode=yes -o ConnectTimeout=15 root@217.217.252.30 \
+          ssh -i ~/.ssh/id_vps -o BatchMode=yes -o ConnectTimeout=15 root@$VPS_HOST \
             'whoami; hostname; uname -a; cat /etc/os-release | head -2; node -v 2>/dev/null || echo "node nao instalado"; npm -v 2>/dev/null || true; df -h / | tail -1; free -m | head -2'
