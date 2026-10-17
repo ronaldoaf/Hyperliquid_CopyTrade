@@ -59,12 +59,19 @@ jobs:
           fi
           REMOTE
 
-      - name: Conferir
+      - name: Conferir a primeira coleta
         run: |
-          sleep 45
           ssh vps "APP_DIR=$APP_DIR bash -s" <<'REMOTE'
           set -a; [ -f $APP_DIR/.env ] && . $APP_DIR/.env; set +a
-          curl -sf -u "admin:${DASH_PASSWORD:-}" http://localhost:8080/api/status; echo
+          start=$(($(date +%s) * 1000))
+          for i in $(seq 1 60); do
+            status=$(curl -s -u "admin:${DASH_PASSWORD:-}" http://localhost:8080/api/status)
+            last=$(echo "$status" | grep -o '"runs":\[{"ts":[0-9]*' | grep -o '[0-9]*$')
+            [ -n "$last" ] && [ "$last" -ge "$start" ] && grep -q '"traders":[1-9]' <<< "$status" && break
+            sleep 10
+          done
+          echo "$status"; echo
           export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh
-          pm2 logs copytrade-dashboard --lines 20 --nostream
+          pm2 logs copytrade-dashboard --lines 15 --nostream
+          du -sh $APP_DIR/data
           REMOTE
