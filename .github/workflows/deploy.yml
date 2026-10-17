@@ -63,7 +63,7 @@ jobs:
         run: |
           ssh vps "APP_DIR=$APP_DIR bash -s" <<'REMOTE'
           set -a; [ -f $APP_DIR/.env ] && . $APP_DIR/.env; set +a
-          start=$(($(date +%s) * 1000))
+          start=$((($(date +%s) - 90) * 1000))  # a coleta começa junto com o servidor, logo antes deste passo
           for i in $(seq 1 60); do
             status=$(curl -s -u "admin:${DASH_PASSWORD:-}" http://localhost:8080/api/status)
             last=$(echo "$status" | grep -o '"runs":\[{"ts":[0-9]*' | grep -o '[0-9]*$')
