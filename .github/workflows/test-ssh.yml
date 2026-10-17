@@ -18,7 +18,9 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_vps
           chmod 600 ~/.ssh/id_vps
-          ssh-keyscan -H 217.217.252.30 >> ~/.ssh/known_hosts
+          echo "Testando a porta 22..."
+          timeout 10 bash -c 'echo > /dev/tcp/217.217.252.30/22' && echo "porta 22 aberta" || echo "porta 22 inacessivel a partir do GitHub"
+          ssh-keyscan -T 15 -H 217.217.252.30 >> ~/.ssh/known_hosts || { echo "ssh-keyscan nao obteve chave do host"; exit 1; }
       - name: Rodar comandos de leitura
         run: |
           ssh -i ~/.ssh/id_vps -o BatchMode=yes -o ConnectTimeout=15 root@217.217.252.30 \
