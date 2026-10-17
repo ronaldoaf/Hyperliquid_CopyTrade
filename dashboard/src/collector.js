@@ -77,9 +77,10 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500 }) {
         await sleep(traderDelayMs);
         continue;
       }
+      // O portfolio traz curvas longas e muda pouco entre coletas, então vai para o bruto só uma vez por hora.
       appendRaw(rawDir, ts, [
         { kind: 'clearinghouse_state', address, data: state },
-        { kind: 'portfolio', address, data: portfolio },
+        ...(new Date(ts).getMinutes() < 15 ? [{ kind: 'portfolio', address, data: portfolio }] : []),
       ]);
       const pos = parsePositions(state);
       const pnl = parsePortfolioPnl(portfolio);

@@ -1,14 +1,23 @@
 const URL = 'https://api.hyperliquid.xyz/info';
 
-export async function info(body) {
-  const res = await fetch(URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`Hyperliquid HTTP ${res.status}`);
-  return res.json();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Repete com espera crescente quando a Hyperliquid limita a taxa (HTTP 429).
+export async function info(body, attempts = 4) {
+  for (let i = 0; ; i++) {
+    const res = await fetch(URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (res.status === 429 && i < attempts - 1) {
+      await sleep(5_000 * 2 ** i);
+      continue;
+    }
+    if (!res.ok) throw new Error(`Hyperliquid HTTP ${res.status}`);
+    return res.json();
+  }
 }
 
 export const getClearinghouseState = (user) => info({ type: 'clearinghouseState', user });

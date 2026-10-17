@@ -73,5 +73,5 @@ jobs:
           echo "$status"; echo
           export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh
           pm2 logs copytrade-dashboard --lines 15 --nostream
-          du -sh $APP_DIR/data
+          du -sh $APP_DIR/data/* $APP_DIR/data/raw/* 2>/dev/null
           REMOTE
