@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_vps
           chmod 600 ~/.ssh/id_vps
           ssh-keyscan -T 15 -H "$VPS_HOST" >> ~/.ssh/known_hosts
-          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_vps\n  BatchMode yes\n  ConnectTimeout 15\n' "$VPS_HOST" >> ~/.ssh/config
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_vps\n  BatchMode yes\n  ConnectTimeout 15\n  ServerAliveInterval 20\n  ServerAliveCountMax 6\n' "$VPS_HOST" >> ~/.ssh/config
 
       - name: Enviar arquivos
         run: |
