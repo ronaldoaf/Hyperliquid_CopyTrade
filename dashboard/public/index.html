@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copytrade Swing</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e2e1dc;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+    --series-1: #2a78d6; --grid: #ecebe7;
+    --good: #0a7d3c; --bad: #c7322f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --series-1: #3987e5; --grid: #262624;
+      --good: #3fbf72; --bad: #ec6b68;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --grid: #262624;
+    --good: #3fbf72; --bad: #ec6b68;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .muted { color: var(--text-muted); }
+  .secondary { color: var(--text-secondary); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .tile .label { color: var(--text-secondary); font-size: 12px; }
+  .tile .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .pos { color: var(--good); } .neg { color: var(--bad); }
+  .chart { position: relative; height: 220px; }
+  .chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface-0); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; display: none; z-index: 2; }
+  .table-wrap { overflow-x: auto; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: 12px; cursor: pointer; user-select: none; }
+  th[aria-sort] { color: var(--text-primary); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr.selected { background: var(--surface-0); }
+  tr.out td { color: var(--text-muted); }
+  .addr { font-family: ui-monospace, monospace; font-size: 13px; }
+  .badge { font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; color: var(--text-muted); }
+  #detail { margin-top: 12px; display: none; }
+  .detail-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .detail-grid > div { min-width: 0; }
+  @media (min-width: 900px) { .detail-grid { grid-template-columns: 1fr 1fr; } }
+  #detailTitle { overflow-wrap: anywhere; }
+  a { color: var(--series-1); }
+  .error { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Copytrade Swing</h1>
+    <span class="secondary">Top 100 da Hyperdash por Copy Score, só traders "Swing de médio prazo"</span>
+    <span class="muted" id="updated"></span>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="card">
+    <h2>PnL somado desde o início do acompanhamento</h2>
+    <div class="chart" id="summaryChart"></div>
+  </section>
+
+  <section class="card" id="detail">
+    <h2 id="detailTitle"></h2>
+    <div class="detail-grid">
+      <div>
+        <div class="secondary" style="margin-bottom:8px">Valor da conta</div>
+        <div class="chart" id="traderChart"></div>
+      </div>
+      <div>
+        <div class="secondary" style="margin-bottom:8px">Posições abertas</div>
+        <div class="table-wrap" style="margin-top:0"><table id="positions"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Traders</h2>
+    <div class="table-wrap"><table id="traders"></table></div>
+  </section>
+</main>
+
+<script>
+const usd = (v, sign = false) => {
+  if (v == null || Number.isNaN(v)) return '–';
+  const s = Math.abs(v) >= 1e6 ? (Math.abs(v) / 1e6).toFixed(2) + 'M'
+    : Math.abs(v) >= 1e3 ? (Math.abs(v) / 1e3).toFixed(1) + 'k' : Math.abs(v).toFixed(0);
+  return (v < 0 ? '−$' : sign && v > 0 ? '+$' : '$') + s;
+};
+const num = (v, d = 1) => v == null ? '–' : Number(v).toFixed(d);
+const cls = (v) => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+const when = (ts) => new Date(ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+async function getJson(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.json();
+}
+
+// Gráfico de linha de uma série, com cruz e tooltip ao passar o mouse.
+function lineChart(el, points, { format = usd, zeroLine = false } = {}) {
+  el.innerHTML = '';
+  if (points.length < 2) {
+    el.innerHTML = '<div class="muted" style="padding-top:80px;text-align:center">Ainda há poucos pontos. O gráfico aparece após a segunda coleta.</div>';
+    return;
+  }
+  const W = el.clientWidth, H = el.clientHeight, pad = { l: 64, r: 12, t: 8, b: 24 };
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (zeroLine) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
+  if (y0 === y1) { y0 -= 1; y1 += 1; }
+  const x0 = xs[0], x1 = xs.at(-1);
+  const sx = (x) => pad.l + (x - x0) / (x1 - x0 || 1) * (W - pad.l - pad.r);
+  const sy = (y) => pad.t + (1 - (y - y0) / (y1 - y0)) * (H - pad.t - pad.b);
+  const ticks = [0, 0.5, 1].map((f) => y0 + f * (y1 - y0));
+  // Quando a variação é pequena perto do valor, o formato compacto repetiria o mesmo rótulo.
+  const fine = (y1 - y0) / Math.max(Math.abs(y0), Math.abs(y1)) < 0.05;
+  const tickFmt = fine ? (v) => (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: y1 - y0 < 10 ? 2 : 0 }) : format;
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
+  const ns = 'http://www.w3.org/2000/svg';
+  el.insertAdjacentHTML('beforeend', `
+    <svg viewBox="0 0 ${W} ${H}" role="img">
+      ${ticks.map((t) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${sy(t)}" y2="${sy(t)}" stroke="var(--grid)"/>
+        <text x="${pad.l - 6}" y="${sy(t) + 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">${tickFmt(t)}</text>`).join('')}
+      ${zeroLine ? `<line x1="${pad.l}" x2="${W - pad.r}" y1="${sy(0)}" y2="${sy(0)}" stroke="var(--text-muted)" stroke-dasharray="3 3"/>` : ''}
+      <text x="${pad.l}" y="${H - 4}" font-size="11" fill="var(--text-muted)">${when(x0)}</text>
+      <text x="${W - pad.r}" y="${H - 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">${when(x1)}</text>
+      <path d="${path}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round"/>
+      <line class="cross" y1="${pad.t}" y2="${H - pad.b}" stroke="var(--text-muted)" visibility="hidden"/>
+      <circle class="dot" r="4" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>
+      <rect class="hit" x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" fill="transparent"/>
+    </svg><div class="tip"></div>`);
+  const svg = el.querySelector('svg'), tip = el.querySelector('.tip');
+  const cross = svg.querySelector('.cross'), dot = svg.querySelector('.dot');
+  svg.querySelector('.hit').addEventListener('pointermove', (e) => {
+    const mx = e.clientX - svg.getBoundingClientRect().left;
+    let best = points[0];
+    for (const p of points) if (Math.abs(sx(p.x) - mx) < Math.abs(sx(best.x) - mx)) best = p;
+    const cx = sx(best.x), cy = sy(best.y);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('visibility', 'visible');
+    tip.style.display = 'block';
+    tip.innerHTML = `<div class="muted">${when(best.x)}</div><div>${format(best.y)}${best.note ? ' · ' + best.note : ''}</div>`;
+    tip.style.left = Math.min(cx + 10, W - tip.offsetWidth) + 'px';
+    tip.style.top = Math.max(cy - 40, 0) + 'px';
+  });
+  svg.querySelector('.hit').addEventListener('pointerleave', () => {
+    tip.style.display = 'none'; cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden');
+  });
+}
+
+const columns = [
+  { key: 'address', label: 'Trader', render: (t) => `<span class="addr">${esc(t.display_name || short(t.address))}</span>${t.in_group ? '' : '<span class="badge">saiu do Top 100</span>'}` },
+  { key: 'copy_score', label: 'Score', render: (t) => num(t.copy_score, 0) },
+  { key: 'account_value', label: 'Conta', render: (t) => usd(t.account_value) },
+  { key: 'pnl_day', label: 'PnL 24h', pnl: true },
+  { key: 'pnl_week', label: 'PnL 7d', pnl: true },
+  { key: 'pnl_month', label: 'PnL 30d', pnl: true },
+  { key: 'pnl_tracked', label: 'Desde que acompanho', pnl: true },
+  { key: 'winrate', label: 'Winrate', render: (t) => num(t.winrate, 0) + '%' },
+  { key: 'sharpe', label: 'Sharpe', render: (t) => num(t.sharpe, 2) },
+  { key: 'drawdown', label: 'Drawdown', render: (t) => num(t.drawdown, 1) + '%' },
+  { key: 'open_positions', label: 'Posições', render: (t) => t.open_positions },
+];
+let traders = [], sort = { key: 'copy_score', dir: -1 }, selected = null;
+
+function renderTiles(list, summary) {
+  const active = list.filter((t) => t.in_group);
+  const sum = (k) => active.reduce((a, t) => a + (t[k] || 0), 0);
+  const last = summary.at(-1);
+  const tiles = [
+    ['Traders acompanhados agora', active.length, null],
+    ['PnL 24h somado', usd(sum('pnl_day'), true), sum('pnl_day')],
+    ['PnL 7d somado', usd(sum('pnl_week'), true), sum('pnl_week')],
+    ['PnL 30d somado', usd(sum('pnl_month'), true), sum('pnl_month')],
+    ['Desde o início do acompanhamento', usd(last?.pnl_tracked ?? 0, true), last?.pnl_tracked ?? 0],
+  ];
+  document.getElementById('tiles').innerHTML = tiles.map(([label, value, v]) =>
+    `<div class="card tile"><div class="label">${label}</div><div class="value ${v == null ? '' : cls(v)}">${value}</div></div>`).join('');
+}
+
+function renderTable() {
+  const rows = [...traders].sort((a, b) => (b.in_group - a.in_group) ||
+    sort.dir * ((a[sort.key] ?? -Infinity) > (b[sort.key] ?? -Infinity) ? 1 : (a[sort.key] ?? -Infinity) < (b[sort.key] ?? -Infinity) ? -1 : 0));
+  const table = document.getElementById('traders');
+  table.innerHTML = `<thead><tr>${columns.map((c) =>
+    `<th data-key="${c.key}" ${sort.key === c.key ? `aria-sort="${sort.dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.label}${sort.key === c.key ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((t) => `<tr data-address="${t.address}" class="${t.in_group ? '' : 'out'} ${t.address === selected ? 'selected' : ''}">
+      ${columns.map((c) => c.pnl ? `<td class="${cls(t[c.key])}">${usd(t[c.key], true)}</td>` : `<td>${c.render(t)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  table.querySelectorAll('th').forEach((th) => th.onclick = () => {
+    const key = th.dataset.key;
+    sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: -1 };
+    renderTable();
+  });
+  table.querySelectorAll('tbody tr').forEach((tr) => tr.onclick = () => showTrader(tr.dataset.address));
+}
+
+async function showTrader(address) {
+  selected = address;
+  renderTable();
+  const t = traders.find((x) => x.address === address);
+  const { history, positions } = await getJson(`/api/traders/${address}`);
+  document.getElementById('detail').style.display = 'block';
+  document.getElementById('detailTitle').innerHTML =
+    `${esc(t.display_name || address)} · <a href="https://hyperdash.com/address/${address}" target="_blank" rel="noopener">Hyperdash</a>
+     · <span class="muted">acompanhado desde ${when(t.first_seen)}</span>`;
+  lineChart(document.getElementById('traderChart'), history.map((h) => ({ x: h.ts, y: h.account_value })));
+  document.getElementById('positions').innerHTML = positions.length ? `
+    <thead><tr><th>Ativo</th><th>Lado</th><th>Valor</th><th>Entrada</th><th>PnL aberto</th><th>Alav.</th><th>Liquidação</th></tr></thead>
+    <tbody>${positions.map((p) => `<tr><td>${esc(p.coin)}</td><td>${p.size > 0 ? 'Long' : 'Short'}</td>
+      <td>${usd(Math.abs(p.position_value))}</td><td>${p.entry_px}</td>
+      <td class="${cls(p.unrealized_pnl)}">${usd(p.unrealized_pnl, true)}</td>
+      <td>${p.leverage ?? '–'}×</td><td>${p.liquidation_px ?? '–'}</td></tr>`).join('')}</tbody>`
+    : '<tbody><tr><td class="muted">Sem posições abertas</td></tr></tbody>';
+  document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function load() {
+  try {
+    const [list, summary, status] = await Promise.all([getJson('/api/traders'), getJson('/api/summary'), getJson('/api/status')]);
+    traders = list;
+    renderTiles(list, summary);
+    lineChart(document.getElementById('summaryChart'),
+      summary.map((s) => ({ x: s.ts, y: s.pnl_tracked, note: `${s.traders} traders` })), { zeroLine: true });
+    renderTable();
+    const run = status.runs[0];
+    document.getElementById('updated').innerHTML = run
+      ? `Última coleta: ${when(run.ts)} ${run.ok ? '' : `<span class="error">(falhou: ${esc(run.error)})</span>`} · a cada ${status.config.intervalMinutes} min`
+      : 'Aguardando a primeira coleta…';
+    if (selected) showTrader(selected);
+  } catch (err) {
+    document.getElementById('updated').innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  }
+}
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>

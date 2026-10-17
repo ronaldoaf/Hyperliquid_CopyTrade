@@ -1,0 +1,12 @@
+{
+  "name": "hyperliquid-copytrade-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Acompanha os traders swing do Top 100 da Hyperdash",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node server.js",
+    "collect": "node src/collect-once.js"
+  }
+}

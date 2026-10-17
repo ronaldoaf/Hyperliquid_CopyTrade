@@ -1,0 +1,70 @@
+name: Deploy do dashboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [dashboard/**, .github/workflows/deploy.yml]
+
+concurrency: deploy
+
+env:
+  VPS_HOST: 217.217.251.30
+  APP_DIR: /opt/copytrade-dashboard
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_vps
+          chmod 600 ~/.ssh/id_vps
+          ssh-keyscan -T 15 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_vps\n  BatchMode yes\n  ConnectTimeout 15\n' "$VPS_HOST" >> ~/.ssh/config
+
+      - name: Enviar arquivos
+        run: |
+          tar czf - --exclude=data --exclude=.env -C dashboard . | \
+            ssh vps "mkdir -p $APP_DIR && tar xzf - -C $APP_DIR"
+
+      - name: Gravar senha do dashboard
+        env:
+          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+        run: |
+          if [ -z "$DASH_PASSWORD" ]; then
+            echo "::warning::Secret DASH_PASSWORD não configurado: o dashboard fica aberto sem senha."
+            ssh vps "rm -f $APP_DIR/.env"
+          else
+            printf 'DASH_PASSWORD=%s\n' "$DASH_PASSWORD" | ssh vps "umask 077 && cat > $APP_DIR/.env"
+          fi
+
+      - name: Iniciar com PM2
+        run: |
+          ssh vps "APP_DIR=$APP_DIR bash -s" <<'REMOTE'
+          set -e
+          export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh
+          command -v pm2 >/dev/null || npm install -g pm2
+          cd $APP_DIR
+          pm2 startOrReload ecosystem.config.cjs --update-env
+          pm2 save
+          if [ ! -f /etc/systemd/system/pm2-root.service ]; then
+            pm2 startup systemd -u root --hp /root
+            pm2 save
+          fi
+          REMOTE
+
+      - name: Conferir
+        run: |
+          sleep 45
+          ssh vps "APP_DIR=$APP_DIR bash -s" <<'REMOTE'
+          set -a; [ -f $APP_DIR/.env ] && . $APP_DIR/.env; set +a
+          curl -sf -u "admin:${DASH_PASSWORD:-}" http://localhost:8080/api/status; echo
+          export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh
+          pm2 logs copytrade-dashboard --lines 20 --nostream
+          REMOTE
