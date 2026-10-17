@@ -21,5 +21,5 @@ jobs:
           ssh-keyscan -H 217.217.252.30 >> ~/.ssh/known_hosts
       - name: Rodar comandos de leitura
         run: |
-          ssh -i ~/.ssh/id_vps -o BatchMode=yes root@217.217.252.30 \
+          ssh -i ~/.ssh/id_vps -o BatchMode=yes -o ConnectTimeout=15 root@217.217.252.30 \
             'whoami; hostname; uname -a; cat /etc/os-release | head -2; node -v 2>/dev/null || echo "node nao instalado"; npm -v 2>/dev/null || true; df -h / | tail -1; free -m | head -2'
