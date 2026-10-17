@@ -1,10 +1,15 @@
 const URL = 'https://api.hyperdash.com/graphql';
 
+// Grupos da página Copytrade: Top 100, ações, BTC, HYPE e CL.
+export const GROUPS = ['copytraders', 'equities', 'btc', 'hype', 'cl'];
+
 const GROUP_QUERY = `
 query GetSystemGroupTraders($groupId: ID!) {
   getSystemGroupTraders(groupId: $groupId) {
-    address displayName lastTradeAt pnl perpsEquity winrate sharpe drawdown
-    totalTrades tag copyScore: copyScoreV2
+    address label verified displayName twitter lastTradeAt lastFillAt
+    pnl perpsEquity winrate pnlCohort sizeCohort
+    totalTrades totalLongTrades totalShortTrades totalWinningTrades totalLosingTrades
+    sharpe drawdown copyScore: copyScoreV2 copyScoreV1: copyScore tag
     topAssets { coin volume pnl }
   }
 }`;

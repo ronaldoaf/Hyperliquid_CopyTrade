@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './src/config.js';
 import { openDb } from './src/db.js';
 import { collect } from './src/collector.js';
+import { dailyBackup } from './src/archive.js';
 
 const db = openDb(config.dbPath);
 const indexHtml = new URL('./public/index.html', import.meta.url);
@@ -22,6 +24,7 @@ const queries = {
       l.winrate, l.sharpe, l.drawdown, l.total_trades, l.open_positions,
       l.pnl_all_time - f.pnl_all_time AS pnl_tracked
     FROM traders t JOIN latest l USING (address) JOIN first f USING (address)
+    WHERE t.tag = :tag
     ORDER BY t.in_group DESC, l.copy_score DESC`),
   history: db.prepare(`SELECT ts, account_value, pnl_all_time, copy_score FROM snapshots
     WHERE address = ? ORDER BY ts`),
@@ -33,8 +36,14 @@ const queries = {
     FROM snapshots s
     JOIN (SELECT address, pnl_all_time AS base FROM snapshots s2
           WHERE ts = (SELECT MIN(ts) FROM snapshots WHERE address = s2.address)) f USING (address)
+    WHERE s.tag = :tag
     GROUP BY s.ts ORDER BY s.ts`),
   runs: db.prepare('SELECT ts, ok, traders, error FROM runs ORDER BY ts DESC LIMIT 20'),
+  counts: db.prepare(`SELECT
+    (SELECT COUNT(*) FROM runs WHERE ok = 1) AS runs, (SELECT COUNT(*) FROM snapshots) AS snapshots,
+    (SELECT COUNT(*) FROM position_snapshots) AS position_snapshots,
+    (SELECT COUNT(*) FROM group_members) AS group_members, (SELECT COUNT(*) FROM fills) AS fills,
+    (SELECT COUNT(*) FROM traders) AS traders`),
 };
 
 function authorized(req) {
@@ -63,7 +72,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(await readFile(indexHtml));
     }
-    if (url.pathname === '/api/traders') return sendJson(res, queries.traders.all());
+    if (url.pathname === '/api/traders') return sendJson(res, queries.traders.all({ tag: config.tag }));
     if (traderMatch) {
       const address = traderMatch[1].toLowerCase();
       return sendJson(res, {
@@ -71,10 +80,19 @@ const server = createServer(async (req, res) => {
         positions: queries.positions.all(address),
       });
     }
-    if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all());
+    if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
     if (url.pathname === '/api/status') {
       return sendJson(res, { config: { groupId: config.groupId, tag: config.tag,
-        intervalMinutes: config.intervalMinutes }, runs: queries.runs.all() });
+        intervalMinutes: config.intervalMinutes }, stored: queries.counts.get(), runs: queries.runs.all() });
+    }
+    // Cópia do banco para análise. Só existe com senha configurada, para não expor os dados.
+    if (url.pathname === '/api/export.db' && config.dashPassword) {
+      const file = `${config.dataDir}/export.db`;
+      await rm(file, { force: true });
+      db.exec(`VACUUM INTO '${file.replaceAll("'", "''")}'`);
+      res.writeHead(200, { 'content-type': 'application/vnd.sqlite3',
+        'content-disposition': `attachment; filename="copytrade-${new Date().toISOString().slice(0, 10)}.db"` });
+      return createReadStream(file).pipe(res);
     }
     sendJson(res, { error: 'não encontrado' }, 404);
   } catch (err) {
@@ -89,7 +107,14 @@ let running = false;
 async function tick() {
   if (running) return;
   running = true;
-  try { await collect(db, config); } finally { running = false; }
+  try {
+    await collect(db, config);
+    dailyBackup(db, config.backupDir);
+  } catch (err) {
+    console.error(`[tick] ${err.message}`);
+  } finally {
+    running = false;
+  }
 }
 tick();
 setInterval(tick, config.intervalMinutes * 60_000);
