@@ -42,8 +42,10 @@ const queries = {
   fillStats: db.prepare(`
     SELECT t.address, t.tag, t.in_group, t.high_freq,
       (SELECT COUNT(*) FROM fills f WHERE f.address = t.address AND f.time >= :since) AS fills_24h,
+      (SELECT COUNT(DISTINCT oid) FROM fills f WHERE f.address = t.address AND f.time >= :since) AS orders_24h,
+      (SELECT COUNT(DISTINCT oid) FROM fills f WHERE f.address = t.address AND f.time >= :week) AS orders_7d,
       (SELECT COUNT(*) FROM fills f WHERE f.address = t.address) AS fills_total
-    FROM traders t ORDER BY fills_24h DESC`),
+    FROM traders t ORDER BY orders_7d DESC`),
   counts: db.prepare(`SELECT
     (SELECT COUNT(*) FROM runs WHERE ok = 1) AS runs, (SELECT COUNT(*) FROM snapshots) AS snapshots,
     (SELECT COUNT(*) FROM position_snapshots) AS position_snapshots,
@@ -87,7 +89,7 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === '/api/fill-stats') {
       return sendJson(res, { maxFillsPerDay: config.maxFillsPerDay,
-        traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000 }) });
+        traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000, week: Date.now() - 7 * 24 * 3600_000 }) });
     }
     if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
     if (url.pathname === '/api/status') {
