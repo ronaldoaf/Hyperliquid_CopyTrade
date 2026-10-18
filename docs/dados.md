@@ -7,12 +7,18 @@ Tudo fica na VPS em `/opt/copytrade-dashboard/data/`. A coleta roda a cada 15 mi
 | Tabela | Conteúdo |
 |---|---|
 | `group_members` | Composição dos 5 grupos da página Copytrade da Hyperdash (`copytraders` = Top 100, `equities`, `btc`, `hype`, `cl`), todos os estilos, com ranking, copyScore V2 e V1, PnL, patrimônio, winrate, sharpe, drawdown, cohort e o JSON completo em `data`. |
-| `traders` | Cada carteira que já passou pelo Top 100, com o estilo (`tag`) e se ainda está nele (`in_group`). |
+| `traders` | Cada carteira que já passou pelo Top 100, com o estilo (`tag`), se ainda está nele (`in_group`) e se opera demais para ser copiada (`high_freq`). |
 | `snapshots` | Por coleta e por trader do Top 100: score, valor da conta (perps principal), patrimônio da Hyperdash (`perps_equity`), PnL 24h/7d/30d/total da Hyperliquid e nº de posições. |
 | `position_snapshots` | Todas as posições abertas de cada trader do Top 100 em cada coleta. |
 | `positions` | Só as posições atuais (usada pelo dashboard). |
 | `fills` | Todas as execuções (fills) de cada trader do Top 100, sem duplicar, desde 30 dias antes da primeira coleta dele. O JSON original fica em `raw`. |
 | `runs` | Log das coletas, com erros. |
+
+## Traders de alta frequência
+
+Quem passa de 20 ordens por dia em média nos últimos 7 dias (`MAX_ORDERS_PER_DAY`) é marcado com `high_freq = 1` de forma permanente:
+sai do dashboard e deixa de ter as execuções coletadas. O score, a conta e as posições continuam sendo gravados.
+As execuções já coletadas antes da marcação ficam no banco. `GET /api/fill-stats` mostra ordens e execuções por trader.
 
 ## Respostas brutas (`raw/AAAA-MM-DD.jsonl.gz`)
 

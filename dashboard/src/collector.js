@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bind = (...values) => values.map((v) => (v === undefined || Number.isNaN(v) ? null : v));
 const FIRST_FILLS_WINDOW_MS = 30 * 24 * 3600_000;
 
-export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxFillsPerDay = 0 }) {
+export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOrdersPerDay = 0 }) {
   const ts = Date.now();
   try {
     // 1. Todos os grupos da página Copytrade, com todos os estilos.
@@ -60,7 +60,7 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxFi
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const getCursor = db.prepare('SELECT last_time FROM fill_cursor WHERE address = ?');
     const isHighFreq = db.prepare('SELECT high_freq FROM traders WHERE address = ?');
-    const countRecentFills = db.prepare('SELECT COUNT(*) AS n FROM fills WHERE address = ? AND time >= ?');
+    const countRecentOrders = db.prepare('SELECT COUNT(DISTINCT oid) AS n FROM fills WHERE address = ? AND time >= ?');
     const markHighFreq = db.prepare('UPDATE traders SET high_freq = 1 WHERE address = ?');
     const setCursor = db.prepare(`INSERT INTO fill_cursor (address, last_time) VALUES (?, ?)
       ON CONFLICT(address) DO UPDATE SET last_time = excluded.last_time`);
@@ -71,7 +71,8 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxFi
       const since = getCursor.get(address)?.last_time ?? ts - FIRST_FILLS_WINDOW_MS;
       // A marcação é permanente: quem já operou demais não volta a ter as execuções coletadas.
       let highFreq = isHighFreq.get(address)?.high_freq === 1;
-      if (!highFreq && maxFillsPerDay > 0 && countRecentFills.get(address, ts - 24 * 3600_000).n > maxFillsPerDay) {
+      // Média de ordens por dia nos últimos 7 dias (uma ordem pode gerar várias execuções).
+      if (!highFreq && maxOrdersPerDay > 0 && countRecentOrders.get(address, ts - 7 * 24 * 3600_000).n / 7 > maxOrdersPerDay) {
         markHighFreq.run(address);
         highFreq = true;
         console.log(`[collector] ${address} marcado como alta frequência`);

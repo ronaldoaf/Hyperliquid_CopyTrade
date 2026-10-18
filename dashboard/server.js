@@ -88,7 +88,7 @@ const server = createServer(async (req, res) => {
       });
     }
     if (url.pathname === '/api/fill-stats') {
-      return sendJson(res, { maxFillsPerDay: config.maxFillsPerDay,
+      return sendJson(res, { maxOrdersPerDay: config.maxOrdersPerDay,
         traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000, week: Date.now() - 7 * 24 * 3600_000 }) });
     }
     if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
