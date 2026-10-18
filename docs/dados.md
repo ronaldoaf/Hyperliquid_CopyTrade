@@ -21,5 +21,5 @@ O `portfolio` (gravado uma vez por hora) traz as curvas completas de valor da co
 
 ## Backups e exportação
 
-- `backups/dashboard-AAAA-MM-DD.db`: cópia diária do banco, mantendo as 14 últimas.
+- `backups/dashboard-AAAA-MM-DD.db`: cópia diária do banco, mantendo as 3 últimas.
 - `GET /api/export.db`: baixa uma cópia do banco na hora. Só funciona com o secret `DASH_PASSWORD` configurado.

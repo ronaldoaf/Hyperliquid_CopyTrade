@@ -13,7 +13,7 @@ export function appendRaw(dir, ts, records) {
 }
 
 // Cópia diária do banco, mantendo as últimas `keep`.
-export function dailyBackup(db, dir, keep = 14) {
+export function dailyBackup(db, dir, keep = 3) {
   mkdirSync(dir, { recursive: true });
   const day = new Date().toISOString().slice(0, 10);
   const file = join(dir, `dashboard-${day}.db`);
