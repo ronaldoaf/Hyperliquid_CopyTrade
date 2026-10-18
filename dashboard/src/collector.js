@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bind = (...values) => values.map((v) => (v === undefined || Number.isNaN(v) ? null : v));
 const FIRST_FILLS_WINDOW_MS = 30 * 24 * 3600_000;
 
-export async function collect(db, { groupId, rawDir, traderDelayMs = 2500 }) {
+export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxFillsPerDay = 0 }) {
   const ts = Date.now();
   try {
     // 1. Todos os grupos da página Copytrade, com todos os estilos.
@@ -59,6 +59,9 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500 }) {
         closed_pnl, fee, fee_token, crossed, oid, hash, raw)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const getCursor = db.prepare('SELECT last_time FROM fill_cursor WHERE address = ?');
+    const isHighFreq = db.prepare('SELECT high_freq FROM traders WHERE address = ?');
+    const countRecentFills = db.prepare('SELECT COUNT(*) AS n FROM fills WHERE address = ? AND time >= ?');
+    const markHighFreq = db.prepare('UPDATE traders SET high_freq = 1 WHERE address = ?');
     const setCursor = db.prepare(`INSERT INTO fill_cursor (address, last_time) VALUES (?, ?)
       ON CONFLICT(address) DO UPDATE SET last_time = excluded.last_time`);
 
@@ -66,10 +69,18 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500 }) {
     for (const t of traders) {
       const address = t.address.toLowerCase();
       const since = getCursor.get(address)?.last_time ?? ts - FIRST_FILLS_WINDOW_MS;
+      // A marcação é permanente: quem já operou demais não volta a ter as execuções coletadas.
+      let highFreq = isHighFreq.get(address)?.high_freq === 1;
+      if (!highFreq && maxFillsPerDay > 0 && countRecentFills.get(address, ts - 24 * 3600_000).n > maxFillsPerDay) {
+        markHighFreq.run(address);
+        highFreq = true;
+        console.log(`[collector] ${address} marcado como alta frequência`);
+      }
       let state, portfolio, fills;
       try {
         [state, portfolio, fills] = await Promise.all([
-          getClearinghouseState(address), getPortfolio(address), getFillsSince(address, since),
+          getClearinghouseState(address), getPortfolio(address),
+          highFreq ? [] : getFillsSince(address, since),
         ]);
       } catch (err) {
         failures++;

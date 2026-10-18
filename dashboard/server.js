@@ -24,7 +24,7 @@ const queries = {
       l.winrate, l.sharpe, l.drawdown, l.total_trades, l.open_positions,
       l.pnl_all_time - f.pnl_all_time AS pnl_tracked
     FROM traders t JOIN latest l USING (address) JOIN first f USING (address)
-    WHERE t.tag = :tag
+    WHERE t.tag = :tag AND t.high_freq = 0
     ORDER BY t.in_group DESC, l.copy_score DESC`),
   history: db.prepare(`SELECT ts, account_value, pnl_all_time, copy_score FROM snapshots
     WHERE address = ? ORDER BY ts`),
@@ -36,9 +36,14 @@ const queries = {
     FROM snapshots s
     JOIN (SELECT address, pnl_all_time AS base FROM snapshots s2
           WHERE ts = (SELECT MIN(ts) FROM snapshots WHERE address = s2.address)) f USING (address)
-    WHERE s.tag = :tag
+    WHERE s.tag = :tag AND s.address NOT IN (SELECT address FROM traders WHERE high_freq = 1)
     GROUP BY s.ts ORDER BY s.ts`),
   runs: db.prepare('SELECT ts, ok, traders, error FROM runs ORDER BY ts DESC LIMIT 20'),
+  fillStats: db.prepare(`
+    SELECT t.address, t.tag, t.in_group, t.high_freq,
+      (SELECT COUNT(*) FROM fills f WHERE f.address = t.address AND f.time >= :since) AS fills_24h,
+      (SELECT COUNT(*) FROM fills f WHERE f.address = t.address) AS fills_total
+    FROM traders t ORDER BY fills_24h DESC`),
   counts: db.prepare(`SELECT
     (SELECT COUNT(*) FROM runs WHERE ok = 1) AS runs, (SELECT COUNT(*) FROM snapshots) AS snapshots,
     (SELECT COUNT(*) FROM position_snapshots) AS position_snapshots,
@@ -79,6 +84,10 @@ const server = createServer(async (req, res) => {
         history: queries.history.all(address),
         positions: queries.positions.all(address),
       });
+    }
+    if (url.pathname === '/api/fill-stats') {
+      return sendJson(res, { maxFillsPerDay: config.maxFillsPerDay,
+        traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000 }) });
     }
     if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
     if (url.pathname === '/api/status') {

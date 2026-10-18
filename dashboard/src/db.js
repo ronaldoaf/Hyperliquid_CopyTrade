@@ -59,6 +59,8 @@ export function openDb(path) {
   addColumn(db, 'traders', 'tag', 'TEXT');
   addColumn(db, 'snapshots', 'tag', 'TEXT');
   addColumn(db, 'snapshots', 'perps_equity', 'REAL');
+  // 1 = opera demais para ser copiado: fica fora do dashboard e as execuções deixam de ser coletadas.
+  addColumn(db, 'traders', 'high_freq', 'INTEGER NOT NULL DEFAULT 0');
   // Antes desta versão só os traders swing eram gravados.
   db.exec(`UPDATE traders SET tag = 'swing' WHERE tag IS NULL;
            UPDATE snapshots SET tag = 'swing' WHERE tag IS NULL;`);

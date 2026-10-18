@@ -7,6 +7,8 @@ export const config = {
   rawDir: `${dataDir}/raw`,
   backupDir: `${dataDir}/backups`,
   intervalMinutes: Number(process.env.COLLECT_INTERVAL_MIN || 15),
+  // Acima disso (execuções nas últimas 24h), o trader é marcado como alta frequência. 0 desliga.
+  maxFillsPerDay: Number(process.env.MAX_FILLS_PER_DAY || 0),
   traderDelayMs: Number(process.env.TRADER_DELAY_MS || 2500),
   groupId: process.env.HYPERDASH_GROUP || 'copytraders',
   tag: process.env.HYPERDASH_TAG || 'swing',
