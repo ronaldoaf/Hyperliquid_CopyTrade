@@ -6,6 +6,7 @@ import { config } from './src/config.js';
 import { openDb } from './src/db.js';
 import { collect } from './src/collector.js';
 import { dailyBackup } from './src/archive.js';
+import { buildPortfolios, trackPortfolios } from './src/portfolios.js';
 
 const db = openDb(config.dbPath);
 const indexHtml = new URL('./public/index.html', import.meta.url);
@@ -67,6 +68,8 @@ function sendJson(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+let portfolioCache = null;
+
 const server = createServer(async (req, res) => {
   if (!authorized(req)) {
     res.writeHead(401, { 'www-authenticate': 'Basic realm="dashboard"' });
@@ -90,6 +93,12 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/fill-stats') {
       return sendJson(res, { maxOrdersPerDay: config.maxOrdersPerDay,
         traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000, week: Date.now() - 7 * 24 * 3600_000 }) });
+    }
+    if (url.pathname === '/api/portfolios') {
+      if (!portfolioCache || Date.now() - portfolioCache.at > 60_000) {
+        portfolioCache = { at: Date.now(), data: trackPortfolios(db) };
+      }
+      return sendJson(res, portfolioCache.data);
     }
     if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
     if (url.pathname === '/api/status') {
@@ -119,7 +128,17 @@ async function tick() {
   if (running) return;
   running = true;
   try {
-    await collect(db, config);
+    const result = await collect(db, config);
+    // As carteiras são montadas uma única vez, com os dados da primeira coleta completa.
+    const hasPortfolios = db.prepare('SELECT COUNT(*) AS n FROM portfolios').get().n > 0;
+    if (result && !hasPortfolios) {
+      try {
+        buildPortfolios(db, result.portfolios, result.ts);
+      } catch (err) {
+        console.error(`[portfolios] ${err.message}`);
+      }
+    }
+    portfolioCache = null;
     dailyBackup(db, config.backupDir);
   } catch (err) {
     console.error(`[tick] ${err.message}`);

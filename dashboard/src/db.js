@@ -55,10 +55,20 @@ export function openDb(path) {
     );
     CREATE INDEX IF NOT EXISTS fills_time ON fills (address, time);
     CREATE TABLE IF NOT EXISTS fill_cursor (address TEXT PRIMARY KEY, last_time INTEGER NOT NULL);
+    -- Carteiras de traders montadas por estratégias de seleção, acompanhadas desde created_at.
+    CREATE TABLE IF NOT EXISTS portfolios (
+      id INTEGER PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT,
+      created_at INTEGER NOT NULL, metrics TEXT
+    );
+    CREATE TABLE IF NOT EXISTS portfolio_members (
+      portfolio_id INTEGER NOT NULL, address TEXT NOT NULL, weight REAL NOT NULL, metrics TEXT,
+      PRIMARY KEY (portfolio_id, address)
+    );
   `);
   addColumn(db, 'traders', 'tag', 'TEXT');
   addColumn(db, 'snapshots', 'tag', 'TEXT');
   addColumn(db, 'snapshots', 'perps_equity', 'REAL');
+  addColumn(db, 'snapshots', 'total_value', 'REAL');
   // 1 = opera demais para ser copiado: fica fora do dashboard e as execuções deixam de ser coletadas.
   addColumn(db, 'traders', 'high_freq', 'INTEGER NOT NULL DEFAULT 0');
   // Antes desta versão só os traders swing eram gravados.

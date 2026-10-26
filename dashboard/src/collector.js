@@ -36,8 +36,15 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOr
     }
     db.exec('COMMIT');
 
-    // 2. Detalhes na Hyperliquid de todos os traders do Top 100.
-    const traders = groups[groupId];
+    // 2. Detalhes na Hyperliquid de todos os traders do Top 100 e dos membros das carteiras.
+    const groupTraders = groups[groupId];
+    const inGroup = new Set(groupTraders.map((t) => t.address.toLowerCase()));
+    const extras = db.prepare(`SELECT DISTINCT m.address, t.display_name, t.tag FROM portfolio_members m
+      LEFT JOIN traders t USING (address)`).all()
+      .filter((m) => !inGroup.has(m.address))
+      .map((m) => ({ address: m.address, displayName: m.display_name, tag: m.tag, extra: true }));
+    const traders = [...groupTraders, ...extras];
+    const portfolios = new Map();
     const upsertTrader = db.prepare(`
       INSERT INTO traders (address, display_name, first_seen, last_seen, in_group, top_assets, tag)
       VALUES (?, ?, ?, ?, 1, ?, ?)
@@ -45,8 +52,9 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOr
         last_seen = excluded.last_seen, in_group = 1, top_assets = excluded.top_assets, tag = excluded.tag`);
     const insertSnap = db.prepare(`
       INSERT INTO snapshots (ts, address, copy_score, account_value, pnl_day, pnl_week, pnl_month,
-        pnl_all_time, winrate, sharpe, drawdown, total_trades, open_positions, tag, perps_equity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        pnl_all_time, winrate, sharpe, drawdown, total_trades, open_positions, tag, perps_equity, total_value)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const touchTrader = db.prepare('UPDATE traders SET last_seen = ? WHERE address = ?');
     const deletePos = db.prepare('DELETE FROM positions WHERE address = ?');
     const insertPos = db.prepare(`
       INSERT INTO positions (address, coin, size, entry_px, position_value, unrealized_pnl,
@@ -94,14 +102,16 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOr
         { kind: 'clearinghouse_state', address, data: state },
         ...(new Date(ts).getMinutes() < 15 ? [{ kind: 'portfolio', address, data: portfolio }] : []),
       ]);
+      portfolios.set(address, portfolio);
       const pos = parsePositions(state);
       const pnl = parsePortfolioPnl(portfolio);
       db.exec('BEGIN');
       try {
-        upsertTrader.run(...bind(address, t.displayName, ts, ts, JSON.stringify(t.topAssets || []), t.tag));
+        if (t.extra) touchTrader.run(ts, address);
+        else upsertTrader.run(...bind(address, t.displayName, ts, ts, JSON.stringify(t.topAssets || []), t.tag));
         insertSnap.run(...bind(ts, address, t.copyScore, pos.accountValue, pnl.day, pnl.week, pnl.month,
           pnl.allTime, t.winrate, t.sharpe, t.drawdown, t.totalTrades, pos.positions.length, t.tag,
-          Number(t.perpsEquity)));
+          Number(t.perpsEquity), pnl.totalValue));
         deletePos.run(address);
         for (const p of pos.positions) {
           const row = [address, p.coin, p.size, p.entryPx, p.positionValue, p.unrealizedPnl, p.leverage, p.liquidationPx];
@@ -123,12 +133,13 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOr
       await sleep(traderDelayMs);
     }
 
-    const current = traders.map((t) => t.address.toLowerCase());
+    const current = [...inGroup];
     db.prepare(`UPDATE traders SET in_group = 0 WHERE address NOT IN (SELECT value FROM json_each(?))`)
       .run(JSON.stringify(current));
     db.prepare('INSERT INTO runs (ts, ok, traders, error) VALUES (?, 1, ?, ?)')
       .run(ts, traders.length, failures ? `${failures} carteiras falharam` : null);
-    console.log(`[collector] ${traders.length} traders do ${groupId}, ${newFills} fills novos, ${failures} falhas, ${Math.round((Date.now() - ts) / 1000)}s`);
+    console.log(`[collector] ${groupTraders.length} traders do ${groupId} + ${extras.length} de carteiras, ${newFills} fills novos, ${failures} falhas, ${Math.round((Date.now() - ts) / 1000)}s`);
+    return { ts, portfolios };
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch {}
     db.prepare('INSERT INTO runs (ts, ok, traders, error) VALUES (?, 0, 0, ?)').run(ts, err.message);

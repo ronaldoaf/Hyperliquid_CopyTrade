@@ -74,6 +74,27 @@
     <span class="muted" id="updated"></span>
   </header>
 
+  <section class="card" style="margin-bottom:12px">
+    <h2>Carteiras <span class="muted" id="pfSince" style="font-weight:400"></span></h2>
+    <div class="secondary" style="font-size:12px">10 carteiras de 8 traders, pesos iguais, sem rebalanceamento. Clique numa carteira para ver os traders.</div>
+    <div class="table-wrap"><table id="portfolios"></table></div>
+  </section>
+
+  <section class="card" id="pfDetail" style="display:none;margin-bottom:12px">
+    <h2 id="pfTitle"></h2>
+    <div class="secondary" id="pfDesc" style="margin-bottom:12px"></div>
+    <div class="detail-grid">
+      <div>
+        <div class="secondary" style="margin-bottom:8px">Retorno acumulado</div>
+        <div class="chart" id="pfChart"></div>
+      </div>
+      <div>
+        <div class="secondary" style="margin-bottom:8px">Traders da carteira</div>
+        <div class="table-wrap" style="margin-top:0"><table id="pfMembers"></table></div>
+      </div>
+    </div>
+  </section>
+
   <section class="tiles" id="tiles"></section>
 
   <section class="card">
@@ -137,7 +158,7 @@ function lineChart(el, points, { format = usd, zeroLine = false } = {}) {
   const sy = (y) => pad.t + (1 - (y - y0) / (y1 - y0)) * (H - pad.t - pad.b);
   const ticks = [0, 0.5, 1].map((f) => y0 + f * (y1 - y0));
   // Quando a variação é pequena perto do valor, o formato compacto repetiria o mesmo rótulo.
-  const fine = (y1 - y0) / Math.max(Math.abs(y0), Math.abs(y1)) < 0.05;
+  const fine = format === usd && (y1 - y0) / Math.max(Math.abs(y0), Math.abs(y1)) < 0.05;
   const tickFmt = fine ? (v) => (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: y1 - y0 < 10 ? 2 : 0 }) : format;
   const path = points.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
   const ns = 'http://www.w3.org/2000/svg';
@@ -238,7 +259,65 @@ async function showTrader(address) {
   document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+const pct = (v, sign = true) => v == null || Number.isNaN(v) ? '–'
+  : (v < 0 ? '−' : sign && v > 0 ? '+' : '') + Math.abs(v * 100).toFixed(Math.abs(v) < 0.1 ? 2 : 1) + '%';
+let portfolios = [], selectedPf = null;
+
+function sparkline(nav) {
+  if (nav.length < 2) return '<span class="muted">–</span>';
+  const W = 120, H = 28, ys = nav.map((p) => p[1]);
+  const y0 = Math.min(...ys, 1), y1 = Math.max(...ys, 1), sy = (y) => H - 2 - (y - y0) / ((y1 - y0) || 1) * (H - 4);
+  const d = nav.map((p, i) => `${i ? 'L' : 'M'}${(i / (nav.length - 1) * W).toFixed(1)},${sy(p[1]).toFixed(1)}`).join('');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><line x1="0" x2="${W}" y1="${sy(1)}" y2="${sy(1)}" stroke="var(--grid)"/><path d="${d}" fill="none" stroke="var(--series-1)" stroke-width="1.5"/></svg>`;
+}
+
+function renderPortfolios() {
+  const table = document.getElementById('portfolios');
+  if (!portfolios.length) {
+    table.innerHTML = '<tbody><tr><td class="muted">As carteiras são montadas ao fim da próxima coleta.</td></tr></tbody>';
+    return;
+  }
+  document.getElementById('pfSince').textContent = `· desde ${when(portfolios[0].createdAt)}`;
+  table.innerHTML = `<thead><tr><th>Carteira</th><th>Retorno</th><th>Queda máx.</th><th>Evolução</th>
+    <th title="Correlação média entre os 8 traders nos 30 dias da seleção">Correlação</th>
+    <th title="Volatilidade anualizada esperada, pelos 30 dias da seleção">Volatilidade</th>
+    <th>Score médio</th><th>Sharpe 30d</th><th>Ordens/dia</th></tr></thead>
+    <tbody>${portfolios.map((p) => `<tr data-id="${p.id}" class="${p.id === selectedPf ? 'selected' : ''}">
+      <td title="${esc(p.description)}">${esc(p.name)}</td>
+      <td class="${cls(p.return)}">${pct(p.return)}</td><td>${pct(p.maxDrawdown, false)}</td>
+      <td>${sparkline(p.nav)}</td>
+      <td>${num(p.selection.avgCorr, 2)}</td><td>${pct(p.selection.volAnnual, false)}</td>
+      <td>${num(p.selection.avgScore, 0)}</td><td>${num(p.selection.avgSharpe, 2)}</td><td>${num(p.selection.avgOrdersPerDay, 1)}</td>
+    </tr>`).join('')}</tbody>`;
+  table.querySelectorAll('tbody tr').forEach((tr) => tr.onclick = () => showPortfolio(Number(tr.dataset.id)));
+}
+
+function showPortfolio(id) {
+  selectedPf = id;
+  renderPortfolios();
+  const p = portfolios.find((x) => x.id === id);
+  document.getElementById('pfDetail').style.display = 'block';
+  document.getElementById('pfTitle').textContent = p.name;
+  document.getElementById('pfDesc').textContent = p.description;
+  lineChart(document.getElementById('pfChart'), p.nav.map(([x, v]) => ({ x, y: v - 1 })), { format: (v) => pct(v), zeroLine: true });
+  document.getElementById('pfMembers').innerHTML = `<thead><tr><th>Trader</th><th>Retorno</th><th>Score</th><th>Sharpe 30d</th><th>Vol. diária</th><th>Ordens/dia</th></tr></thead>
+    <tbody>${p.members.map((m) => `<tr><td><a class="addr" href="https://hyperdash.com/address/${m.address}" target="_blank" rel="noopener">${esc(m.name || short(m.address))}</a>${m.inGroup ? '' : '<span class="badge">saiu do Top 100</span>'}</td>
+      <td class="${cls(m.return)}">${pct(m.return)}</td><td>${num(m.selection.score, 0)}</td><td>${num(m.selection.sharpe30, 2)}</td>
+      <td>${pct(m.selection.vol, false)}</td><td>${num(m.selection.ordersPerDay, 1)}</td></tr>`).join('')}</tbody>`;
+}
+
 async function load() {
+  try {
+    portfolios = await getJson('/api/portfolios');
+    renderPortfolios();
+    if (selectedPf) showPortfolio(selectedPf);
+  } catch (err) {
+    document.getElementById('portfolios').innerHTML = `<tbody><tr><td class="error">${esc(err.message)}</td></tr></tbody>`;
+  }
+  await loadTraders();
+}
+
+async function loadTraders() {
   try {
     const [list, summary, status] = await Promise.all([getJson('/api/traders'), getJson('/api/summary'), getJson('/api/status')]);
     traders = list;

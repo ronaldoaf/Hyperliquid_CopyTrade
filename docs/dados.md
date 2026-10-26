@@ -14,6 +14,18 @@ Tudo fica na VPS em `/opt/copytrade-dashboard/data/`. A coleta roda a cada 15 mi
 | `fills` | Todas as execuções (fills) de cada trader do Top 100, sem duplicar, desde 30 dias antes da primeira coleta dele. O JSON original fica em `raw`. |
 | `runs` | Log das coletas, com erros. |
 
+## Carteiras
+
+`portfolios` e `portfolio_members` guardam as 10 carteiras de 8 traders montadas na primeira coleta após o deploy
+(`dashboard/src/portfolios.js`). Candidatos: traders swing do Top 100, fora da alta frequência, com pelo menos 20 dias de
+histórico e conta de US$ 10 mil ou mais. As métricas de seleção usam os 30 dias anteriores (janela `month` do portfolio da
+Hyperliquid, fechada por dia UTC): retorno diário = PnL do dia / valor da conta na véspera; volatilidade = desvio do retorno
+diário; Sharpe = média / desvio × √365; correlação de Pearson entre os retornos diários.
+
+O acompanhamento começa na criação: cada trader recebe 1/8 do capital, sem rebalancear, e o retorno de cada coleta é a variação
+do PnL total dividida pelo valor total da conta (`snapshots.total_value`). Quem sai do Top 100 continua sendo coletado enquanto
+estiver em alguma carteira.
+
 ## Traders de alta frequência
 
 Quem passa de 20 ordens por dia em média nos últimos 7 dias (`MAX_ORDERS_PER_DAY`) é marcado com `high_freq = 1` de forma permanente:

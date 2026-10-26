@@ -45,7 +45,10 @@ export function parsePortfolioPnl(data) {
     const h = v.pnlHistory || [];
     out[period] = h.length ? Number(h.at(-1)[1]) - Number(h[0][1]) : 0;
   }
-  return { day: out.day ?? 0, week: out.week ?? 0, month: out.month ?? 0, allTime: out.allTime ?? 0 };
+  // Valor total da conta (perps + spot) no mesmo critério do PnL acima.
+  const allTime = data.find(([period]) => period === 'allTime')?.[1];
+  const totalValue = allTime?.accountValueHistory?.length ? Number(allTime.accountValueHistory.at(-1)[1]) : null;
+  return { day: out.day ?? 0, week: out.week ?? 0, month: out.month ?? 0, allTime: out.allTime ?? 0, totalValue };
 }
 
 // Todas as execuções desde startTime. A API devolve no máximo 2000 por chamada, então pagina pelo tempo.
