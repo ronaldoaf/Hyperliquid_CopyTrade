@@ -1,0 +1,35 @@
+name: Pesquisa do copyScore
+
+# Roda os scripts de engenharia reversa do score num runner com acesso à internet
+# e guarda as saídas como artefato.
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: [scripts/score/**, .github/workflows/score-research.yml]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Fase 0 (pistas no site e na API)
+        run: python3 scripts/score/probe.py probe_out
+      - name: Trechos com palavras-chave
+        if: always()
+        run: head -c 60000 probe_out/snippets.txt || true
+      - name: Queries extraídas
+        if: always()
+        run: head -c 60000 probe_out/queries.graphql || true
+      - name: Resultados das queries
+        if: always()
+        run: head -c 60000 probe_out/query_results.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe_out
+          path: probe_out/
