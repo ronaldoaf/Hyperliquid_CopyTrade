@@ -12,6 +12,10 @@ export const config = {
   traderDelayMs: Number(process.env.TRADER_DELAY_MS || 2500),
   groupId: process.env.HYPERDASH_GROUP || 'copytraders',
   tag: process.env.HYPERDASH_TAG || 'swing',
+  // Amostra diária para a engenharia reversa do copyScore (docs/copyscore.md). SCORE_SAMPLES=0 desliga.
+  scoreSamples: process.env.SCORE_SAMPLES !== '0',
+  sampleTarget: Number(process.env.SAMPLE_TARGET || 8000),
+  sampleDelayMs: Number(process.env.SAMPLE_DELAY_MS || 1000),
   dashUser: process.env.DASH_USER || 'admin',
   dashPassword: process.env.DASH_PASSWORD || '',
 };
