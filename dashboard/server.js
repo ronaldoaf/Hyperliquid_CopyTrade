@@ -7,6 +7,7 @@ import { openDb } from './src/db.js';
 import { collect } from './src/collector.js';
 import { dailyBackup } from './src/archive.js';
 import { buildPortfolios, trackPortfolios } from './src/portfolios.js';
+import { migrateScoreSamples, collectScoreSamples } from './src/score-samples.js';
 
 const db = openDb(config.dbPath);
 const indexHtml = new URL('./public/index.html', import.meta.url);
@@ -148,3 +149,20 @@ async function tick() {
 }
 tick();
 setInterval(tick, config.intervalMinutes * 60_000);
+
+// Amostra do copyScore: roda à parte da coleta de 15 min, uma vez por dia (leva algumas horas).
+let sampling = false;
+async function sampleTick() {
+  if (sampling || !config.scoreSamples) return;
+  sampling = true;
+  try {
+    await collectScoreSamples(db, { rawDir: config.rawDir, target: config.sampleTarget, delayMs: config.sampleDelayMs });
+  } catch (err) {
+    console.error(`[samples] ${err.message}`);
+  } finally {
+    sampling = false;
+  }
+}
+migrateScoreSamples(db);
+setTimeout(sampleTick, 60_000);
+setInterval(sampleTick, 60 * 60_000);
