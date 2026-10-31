@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { config } from './src/config.js';
 import { openDb } from './src/db.js';
 import { collect } from './src/collector.js';
@@ -35,11 +36,12 @@ const queries = {
   positions: db.prepare(`SELECT coin, size, entry_px, position_value, unrealized_pnl, leverage,
     liquidation_px, ts FROM positions WHERE address = ? ORDER BY ABS(position_value) DESC`),
   // Soma, a cada coleta, do PnL acumulado desde que cada trader entrou no acompanhamento.
+  // O MIN(ts) com GROUP BY faz o SQLite devolver o pnl_all_time da primeira linha de cada trader
+  // numa só passada pelo índice, em vez de uma subconsulta por linha.
   summary: db.prepare(`
+    WITH f AS (SELECT address, pnl_all_time AS base, MIN(ts) FROM snapshots GROUP BY address)
     SELECT s.ts, SUM(s.pnl_all_time - f.base) AS pnl_tracked, COUNT(*) AS traders
-    FROM snapshots s
-    JOIN (SELECT address, pnl_all_time AS base FROM snapshots s2
-          WHERE ts = (SELECT MIN(ts) FROM snapshots WHERE address = s2.address)) f USING (address)
+    FROM snapshots s JOIN f USING (address)
     WHERE s.tag = :tag AND s.address NOT IN (SELECT address FROM traders WHERE high_freq = 1)
     GROUP BY s.ts ORDER BY s.ts`),
   runs: db.prepare('SELECT ts, ok, traders, error FROM runs ORDER BY ts DESC LIMIT 20'),
@@ -66,12 +68,33 @@ function authorized(req) {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-function sendJson(res, data, status = 200) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(data));
+function send(req, res, body, type, status = 200) {
+  const headers = { 'content-type': type, 'cache-control': 'no-cache' };
+  if (body.length > 1024 && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    body = gzipSync(body);
+    headers['content-encoding'] = 'gzip';
+  }
+  headers['content-length'] = body.length;
+  res.writeHead(status, headers);
+  res.end(body);
 }
 
-let portfolioCache = null;
+function sendJson(req, res, data, status = 200) {
+  send(req, res, Buffer.from(JSON.stringify(data)), 'application/json; charset=utf-8', status);
+}
+
+// Os dados só mudam a cada coleta (ou a cada ciclo do paper trading), então as respostas ficam guardadas
+// até lá. Assim o carregamento da página não refaz as consultas pesadas no SQLite, que travam o servidor.
+const cache = new Map();
+function cached(key, ttlMs, build) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.data;
+  const data = build();
+  cache.set(key, { at: Date.now(), data });
+  return data;
+}
+const clearCache = (prefix = '') => { for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k); };
+const LONG = 30 * 60_000;
 
 const server = createServer(async (req, res) => {
   if (!authorized(req)) {
@@ -82,32 +105,28 @@ const server = createServer(async (req, res) => {
   const traderMatch = url.pathname.match(/^\/api\/traders\/(0x[0-9a-fA-F]{40})$/);
   try {
     if (url.pathname === '/') {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(await readFile(indexHtml));
+      return send(req, res, await readFile(indexHtml), 'text/html; charset=utf-8');
     }
-    if (url.pathname === '/api/traders') return sendJson(res, queries.traders.all({ tag: config.tag }));
+    if (url.pathname === '/api/traders') return sendJson(req, res, cached('traders', LONG, () => queries.traders.all({ tag: config.tag })));
     if (traderMatch) {
       const address = traderMatch[1].toLowerCase();
-      return sendJson(res, {
+      return sendJson(req, res, {
         history: queries.history.all(address),
         positions: queries.positions.all(address),
       });
     }
     if (url.pathname === '/api/fill-stats') {
-      return sendJson(res, { maxOrdersPerDay: config.maxOrdersPerDay,
-        traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000, week: Date.now() - 7 * 24 * 3600_000 }) });
+      return sendJson(req, res, cached('fill-stats', LONG, () => ({ maxOrdersPerDay: config.maxOrdersPerDay,
+        traders: queries.fillStats.all({ since: Date.now() - 24 * 3600_000, week: Date.now() - 7 * 24 * 3600_000 }) })));
     }
     if (url.pathname === '/api/portfolios') {
-      if (!portfolioCache || Date.now() - portfolioCache.at > 60_000) {
-        portfolioCache = { at: Date.now(), data: trackPortfolios(db) };
-      }
-      return sendJson(res, portfolioCache.data);
+      return sendJson(req, res, cached('portfolios', LONG, () => trackPortfolios(db)));
     }
-    if (url.pathname === '/api/paper') return sendJson(res, paperReport(db));
-    if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
+    if (url.pathname === '/api/paper') return sendJson(req, res, cached('paper', 60_000, () => paperReport(db)));
+    if (url.pathname === '/api/summary') return sendJson(req, res, cached('summary', LONG, () => queries.summary.all({ tag: config.tag })));
     if (url.pathname === '/api/status') {
-      return sendJson(res, { config: { groupId: config.groupId, tag: config.tag,
-        intervalMinutes: config.intervalMinutes }, stored: queries.counts.get(), runs: queries.runs.all() });
+      return sendJson(req, res, cached('status', LONG, () => ({ config: { groupId: config.groupId, tag: config.tag,
+        intervalMinutes: config.intervalMinutes }, stored: queries.counts.get(), runs: queries.runs.all() })));
     }
     // Cópia do banco para análise. Só existe com senha configurada, para não expor os dados.
     if (url.pathname === '/api/export.db' && config.dashPassword) {
@@ -118,10 +137,10 @@ const server = createServer(async (req, res) => {
         'content-disposition': `attachment; filename="copytrade-${new Date().toISOString().slice(0, 10)}.db"` });
       return createReadStream(file).pipe(res);
     }
-    sendJson(res, { error: 'não encontrado' }, 404);
+    sendJson(req, res, { error: 'não encontrado' }, 404);
   } catch (err) {
     console.error(err);
-    sendJson(res, { error: err.message }, 500);
+    sendJson(req, res, { error: err.message }, 500);
   }
 });
 
@@ -142,7 +161,6 @@ async function tick() {
         console.error(`[portfolios] ${err.message}`);
       }
     }
-    portfolioCache = null;
     if (result && config.paper) {
       try {
         weeklyEvaluation(db, result.portfolios, result.ts);
@@ -151,6 +169,7 @@ async function tick() {
       }
     }
     dailyBackup(db, config.backupDir);
+    clearCache();
   } catch (err) {
     console.error(`[tick] ${err.message}`);
   } finally {
@@ -167,6 +186,7 @@ async function paperLoop() {
   paperRunning = true;
   try {
     await paperTick(db);
+    clearCache('paper');
   } catch (err) {
     console.error(`[paper] ${err.message}`);
   } finally {

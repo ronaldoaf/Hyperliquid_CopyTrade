@@ -354,6 +354,7 @@ async function loadPaper() {
 
 async function load() {
   loadPaper();
+  const tradersDone = loadTraders();
   try {
     portfolios = await getJson('/api/portfolios');
     renderPortfolios();
@@ -361,7 +362,7 @@ async function load() {
   } catch (err) {
     document.getElementById('portfolios').innerHTML = `<tbody><tr><td class="error">${esc(err.message)}</td></tr></tbody>`;
   }
-  await loadTraders();
+  await tradersDone;
 }
 
 async function loadTraders() {
