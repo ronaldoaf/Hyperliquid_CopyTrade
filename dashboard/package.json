@@ -7,6 +7,7 @@
   "engines": { "node": ">=22.13" },
   "scripts": {
     "start": "node server.js",
-    "collect": "node src/collect-once.js"
+    "collect": "node src/collect-once.js",
+    "test": "node --test --disable-warning=ExperimentalWarning test/*.test.js"
   }
 }
