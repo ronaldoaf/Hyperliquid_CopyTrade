@@ -63,6 +63,11 @@ test('histerese da seleção', () => {
   assert.equal(by.x, 'enter');
   assert.equal(by.y, undefined);
   assert.equal(evaluate([{ address: 'a', score: 40 }], followers, c)[0].action, 'close');
+  // Teto de correlação: x é parecido demais com a, então entra y.
+  const corr = (p, q) => ([p.address, q.address].sort().join() === 'a,x' ? 0.8 : 0.1);
+  const c2 = { ...c, maxTraders: 3, maxCorr: 0.4, enterScore: 80 };
+  const acts2 = evaluate([{ address: 'a', score: 80 }, { address: 'x', score: 90 }, { address: 'y', score: 84 }], followers.slice(0, 1), c2, corr);
+  assert.deepEqual(acts2.filter((x) => x.action === 'enter').map((x) => x.address), ['y']);
 });
 
 test('ciclo completo com banco em memória', async () => {

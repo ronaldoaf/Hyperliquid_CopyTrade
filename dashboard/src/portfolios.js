@@ -36,7 +36,7 @@ function aligned(a, b) {
   return [xs, ys];
 }
 
-function correlation(a, b) {
+export function correlation(a, b) {
   const [xs, ys] = aligned(a, b);
   // Sem dias suficientes em comum, assume correlação moderada em vez de fingir que é zero.
   if (xs.length < 10) return 0.5;

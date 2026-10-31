@@ -331,7 +331,7 @@ async function loadPaper() {
     const name = (f) => esc(f.display_name || short(f.address));
     document.getElementById('ppSince').textContent = p.startedAt ? `· desde ${when(p.startedAt)}` : '';
     document.getElementById('ppRules').textContent = `Conta simulada de ${usd(c.capital)}. Até ${c.maxTraders} traders, ${pct(c.allocFrac, false)} do patrimônio cada; `
-      + `entra com score ≥ ${c.enterScore}, sai abaixo de ${c.exitScore} ou após ${c.maxMisses} avaliações fora. `
+      + `entra com score ≥ ${c.enterScore} e correlação ≤ ${c.maxCorr} com os seguidos, sai abaixo de ${c.exitScore} ou após ${c.maxMisses} avaliações fora. `
       + `Taxa ${c.feeBps} bps + spread + ${c.slippageBps} bps de slippage, com funding. Última avaliação: ${p.lastEval ? when(p.lastEval) : 'ainda não houve'}.`;
     document.getElementById('ppEquity').innerHTML = `Patrimônio ${usd(a.equity)} · <span class="${cls(a.equity - c.capital)}">${pct(a.equity / c.capital - 1)}</span> · alavancagem ${num(a.gross / a.equity, 2)}x`;
     lineChart(document.getElementById('ppChart'), p.equity.map((e) => ({ x: e.ts, y: e.equity })));

@@ -4,6 +4,7 @@
 // Regras:
 // - Seleção semanal com histerese: entra quem tem score >= enterScore (até maxTraders); sai na hora (run-off)
 //   quem cai abaixo de exitScore; quem só sai da lista de candidatos sai depois de maxMisses avaliações seguidas.
+// - Só entra quem tem correlação de no máximo maxCorr com cada trader seguido (retornos diários de 30 dias).
 // - Trader novo: as posições que ele já tinha ao entrar são ignoradas; só copia o que abrir dali em diante.
 // - Alocação fixa por trader (allocFrac do patrimônio, refeita a cada avaliação). A posição copiada é a dele
 //   vezes alocação / valor da conta dele, com teto de alavancagem por trader, por ativo e total.
@@ -11,15 +12,17 @@
 //   de runoffDays ou se o PnL da fatia cair runoffStop da alocação desde o início do run-off.
 //   Se o motivo da saída for risco, fecha na hora.
 import { info, parsePositions } from './hyperliquid.js';
-import { buildCandidates } from './portfolios.js';
+import { buildCandidates, correlation } from './portfolios.js';
 
 const HOUR = 3_600_000, DAY = 24 * HOUR;
 const env = (k, d) => (process.env[k] === undefined || process.env[k] === '' ? d : Number(process.env[k]));
 
 export const PAPER = {
   capital: env('PAPER_CAPITAL', 100_000),
-  maxTraders: env('PAPER_MAX_TRADERS', 6),
-  allocFrac: env('PAPER_ALLOC', 0.15),
+  maxTraders: env('PAPER_MAX_TRADERS', 10),
+  allocFrac: env('PAPER_ALLOC', 0.10),
+  // Na entrada, correlação máxima dos retornos diários (30d) com cada trader já seguido.
+  maxCorr: env('PAPER_MAX_CORR', 0.4),
   enterScore: env('PAPER_ENTER_SCORE', 85),
   exitScore: env('PAPER_EXIT_SCORE', 75),
   // Abaixo disso a Hyperdash sugere "countertrade": sai na hora em vez de fazer run-off.
@@ -159,23 +162,26 @@ export function shouldTrade(current, target, px, cfg = PAPER) {
   return notional >= cfg.minTradeUsd && Math.abs(delta) >= cfg.minTradeFrac * Math.abs(target);
 }
 
-// Decide quem entra, quem sai e por quê. candidates: [{address, score}], followers: linhas ativas.
-export function evaluate(candidates, followers, cfg = PAPER) {
+// Decide quem entra, quem sai e por quê. candidates: [{address, score, returns}], followers: linhas ativas.
+export function evaluate(candidates, followers, cfg = PAPER, corr = (a, b) => (a.returns && b.returns ? correlation(a.returns, b.returns) : 0)) {
   const byAddr = new Map(candidates.map((c) => [c.address, c]));
   const actions = [];
   let active = 0;
+  const held = []; // candidatos já seguidos que continuam, para o teto de correlação
   for (const f of followers.filter((x) => x.status === 'active')) {
     const c = byAddr.get(f.address);
     if (c && c.score < cfg.riskScore) actions.push({ address: f.address, action: 'close', reason: `risco: score ${c.score.toFixed(1)}` });
     else if (c && c.score < cfg.exitScore) actions.push({ address: f.address, action: 'runoff', reason: `score ${c.score.toFixed(1)} < ${cfg.exitScore}` });
     else if (!c && f.misses + 1 >= cfg.maxMisses) actions.push({ address: f.address, action: 'runoff', reason: `${f.misses + 1} avaliações fora da lista` });
-    else { actions.push({ address: f.address, action: c ? 'keep' : 'miss', score: c?.score }); active++; }
+    else { actions.push({ address: f.address, action: c ? 'keep' : 'miss', score: c?.score }); active++; if (c) held.push(c); }
   }
   const busy = new Set(followers.filter((x) => x.status !== 'closed').map((x) => x.address));
   for (const c of [...candidates].sort((a, b) => b.score - a.score)) {
     if (active >= cfg.maxTraders) break;
     if (busy.has(c.address) || !(c.score >= cfg.enterScore)) continue;
+    if (held.some((h) => corr(h, c) > cfg.maxCorr)) continue;
     actions.push({ address: c.address, action: 'enter', score: c.score });
+    held.push(c);
     active++;
   }
   return actions;
@@ -235,7 +241,7 @@ export function weeklyEvaluation(db, portfolioByAddress, now = Date.now(), { for
   if (!force && now - last < PAPER.evalEveryDays * DAY) return null;
   const candidates = buildCandidates(db, portfolioByAddress, now)
     .filter((c) => c.sharpe > 0)
-    .map((c) => ({ address: c.address, score: c.score, name: c.name }));
+    .map((c) => ({ address: c.address, score: c.score, name: c.name, returns: c.returns }));
   const followers = db.prepare("SELECT * FROM paper_followers WHERE status != 'closed'").all();
   const actions = evaluate(candidates, followers);
   const { equity } = accountSummary(db, getState(db, 'last_prices'));
