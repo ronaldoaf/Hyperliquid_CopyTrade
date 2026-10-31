@@ -8,8 +8,10 @@ import { collect } from './src/collector.js';
 import { dailyBackup } from './src/archive.js';
 import { buildPortfolios, trackPortfolios } from './src/portfolios.js';
 import { migrateScoreSamples, collectScoreSamples } from './src/score-samples.js';
+import { PAPER, migratePaper, weeklyEvaluation, paperTick, paperReport } from './src/paper.js';
 
 const db = openDb(config.dbPath);
+migratePaper(db);
 const indexHtml = new URL('./public/index.html', import.meta.url);
 
 const queries = {
@@ -101,6 +103,7 @@ const server = createServer(async (req, res) => {
       }
       return sendJson(res, portfolioCache.data);
     }
+    if (url.pathname === '/api/paper') return sendJson(res, paperReport(db));
     if (url.pathname === '/api/summary') return sendJson(res, queries.summary.all({ tag: config.tag }));
     if (url.pathname === '/api/status') {
       return sendJson(res, { config: { groupId: config.groupId, tag: config.tag,
@@ -140,6 +143,13 @@ async function tick() {
       }
     }
     portfolioCache = null;
+    if (result && config.paper) {
+      try {
+        weeklyEvaluation(db, result.portfolios, result.ts);
+      } catch (err) {
+        console.error(`[paper] avaliação: ${err.message}`);
+      }
+    }
     dailyBackup(db, config.backupDir);
   } catch (err) {
     console.error(`[tick] ${err.message}`);
@@ -149,6 +159,21 @@ async function tick() {
 }
 tick();
 setInterval(tick, config.intervalMinutes * 60_000);
+
+// Paper trading: ciclo próprio, bem mais curto que a coleta, para copiar as mudanças de posição com pouco atraso.
+let paperRunning = false;
+async function paperLoop() {
+  if (paperRunning || !config.paper) return;
+  paperRunning = true;
+  try {
+    await paperTick(db);
+  } catch (err) {
+    console.error(`[paper] ${err.message}`);
+  } finally {
+    paperRunning = false;
+  }
+}
+setInterval(paperLoop, PAPER.intervalSec * 1000);
 
 // Amostra do copyScore: roda à parte da coleta de 15 min, uma vez por dia (leva algumas horas).
 let sampling = false;

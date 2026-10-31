@@ -39,8 +39,10 @@ export async function collect(db, { groupId, rawDir, traderDelayMs = 2500, maxOr
     // 2. Detalhes na Hyperliquid de todos os traders do Top 100 e dos membros das carteiras.
     const groupTraders = groups[groupId];
     const inGroup = new Set(groupTraders.map((t) => t.address.toLowerCase()));
-    const extras = db.prepare(`SELECT DISTINCT m.address, t.display_name, t.tag FROM portfolio_members m
-      LEFT JOIN traders t USING (address)`).all()
+    // Membros das carteiras e traders seguidos no paper trading continuam sendo coletados fora do Top 100.
+    const extras = db.prepare(`SELECT DISTINCT a.address, t.display_name, t.tag FROM (
+        SELECT address FROM portfolio_members UNION SELECT address FROM paper_followers WHERE status != 'closed'
+      ) a LEFT JOIN traders t USING (address)`).all()
       .filter((m) => !inGroup.has(m.address))
       .map((m) => ({ address: m.address, displayName: m.display_name, tag: m.tag, extra: true }));
     const traders = [...groupTraders, ...extras];

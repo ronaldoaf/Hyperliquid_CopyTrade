@@ -75,6 +75,23 @@
   </header>
 
   <section class="card" style="margin-bottom:12px">
+    <h2>Paper trading <span class="muted" id="ppSince" style="font-weight:400"></span></h2>
+    <div class="secondary" style="font-size:12px" id="ppRules"></div>
+    <div class="detail-grid" style="margin-top:12px">
+      <div>
+        <div class="secondary" style="margin-bottom:8px" id="ppEquity"></div>
+        <div class="chart" id="ppChart"></div>
+      </div>
+      <div>
+        <div class="secondary" style="margin-bottom:8px">Traders seguidos</div>
+        <div class="table-wrap" style="margin-top:0"><table id="ppFollowers"></table></div>
+      </div>
+    </div>
+    <div class="secondary" style="margin:12px 0 0">Últimas ordens simuladas</div>
+    <div class="table-wrap"><table id="ppTrades"></table></div>
+  </section>
+
+  <section class="card" style="margin-bottom:12px">
     <h2>Carteiras <span class="muted" id="pfSince" style="font-weight:400"></span></h2>
     <div class="secondary" style="font-size:12px">10 carteiras de 8 traders, pesos iguais, sem rebalanceamento. Clique numa carteira para ver os traders.</div>
     <div class="table-wrap"><table id="portfolios"></table></div>
@@ -306,7 +323,37 @@ function showPortfolio(id) {
       <td>${pct(m.selection.vol, false)}</td><td>${num(m.selection.ordersPerDay, 1)}</td></tr>`).join('')}</tbody>`;
 }
 
+const STATUS = { active: 'copiando', runoff: 'run-off', closing: 'fechando', closed: 'encerrado' };
+async function loadPaper() {
+  try {
+    const p = await getJson('/api/paper');
+    const c = p.config, a = p.account;
+    const name = (f) => esc(f.display_name || short(f.address));
+    document.getElementById('ppSince').textContent = p.startedAt ? `· desde ${when(p.startedAt)}` : '';
+    document.getElementById('ppRules').textContent = `Conta simulada de ${usd(c.capital)}. Até ${c.maxTraders} traders, ${pct(c.allocFrac, false)} do patrimônio cada; `
+      + `entra com score ≥ ${c.enterScore}, sai abaixo de ${c.exitScore} ou após ${c.maxMisses} avaliações fora. `
+      + `Taxa ${c.feeBps} bps + spread + ${c.slippageBps} bps de slippage, com funding. Última avaliação: ${p.lastEval ? when(p.lastEval) : 'ainda não houve'}.`;
+    document.getElementById('ppEquity').innerHTML = `Patrimônio ${usd(a.equity)} · <span class="${cls(a.equity - c.capital)}">${pct(a.equity / c.capital - 1)}</span> · alavancagem ${num(a.gross / a.equity, 2)}x`;
+    lineChart(document.getElementById('ppChart'), p.equity.map((e) => ({ x: e.ts, y: e.equity })));
+    const openPnl = {};
+    for (const l of p.legs) openPnl[l.address] = (openPnl[l.address] || 0) + l.size * ((p.prices?.[l.coin] ?? l.entry_px) - l.entry_px);
+    document.getElementById('ppFollowers').innerHTML = p.followers.length ? `<thead><tr><th>Trader</th><th>Situação</th><th>Score</th><th>Alocação</th><th>PnL</th><th>Taxas</th></tr></thead>
+      <tbody>${p.followers.map((f) => `<tr><td><a class="addr" href="https://hyperdash.com/address/${f.address}" target="_blank" rel="noopener">${name(f)}</a></td>
+        <td title="${esc(f.exit_reason || '')}">${STATUS[f.status] || f.status}</td><td>${num(f.score, 0)}</td><td>${usd(f.alloc)}</td>
+        <td class="${cls((f.closed_pnl || 0) + (openPnl[f.address] || 0))}">${usd((f.closed_pnl || 0) + (openPnl[f.address] || 0), true)}</td><td>${usd(f.fees || 0)}</td></tr>`).join('')}</tbody>`
+      : '<tbody><tr><td class="muted">Ninguém seguido ainda: a primeira avaliação roda ao fim da próxima coleta.</td></tr></tbody>';
+    document.getElementById('ppTrades').innerHTML = p.trades.length ? `<thead><tr><th>Quando</th><th>Trader</th><th>Ativo</th><th>Lado</th><th>Nocional</th><th>Preço</th><th>Taxa</th><th>Motivo</th></tr></thead>
+      <tbody>${p.trades.slice(0, 20).map((t) => `<tr><td>${when(t.ts)}</td><td class="addr">${short(t.address)}</td><td>${esc(t.coin)}</td>
+        <td class="${t.size > 0 ? 'pos' : 'neg'}">${t.size > 0 ? 'compra' : 'venda'}</td><td>${usd(Math.abs(t.size * t.px))}</td>
+        <td>${num(t.px, t.px < 1 ? 5 : 2)}</td><td>${usd(t.fee)}</td><td>${esc(t.reason || '')}</td></tr>`).join('')}</tbody>`
+      : '<tbody><tr><td class="muted">Nenhuma ordem simulada ainda.</td></tr></tbody>';
+  } catch (err) {
+    document.getElementById('ppRules').innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  }
+}
+
 async function load() {
+  loadPaper();
   try {
     portfolios = await getJson('/api/portfolios');
     renderPortfolios();

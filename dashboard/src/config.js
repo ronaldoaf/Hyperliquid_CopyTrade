@@ -16,6 +16,8 @@ export const config = {
   scoreSamples: process.env.SCORE_SAMPLES !== '0',
   sampleTarget: Number(process.env.SAMPLE_TARGET || 8000),
   sampleDelayMs: Number(process.env.SAMPLE_DELAY_MS || 1000),
+  // Paper trading de copytrading (src/paper.js). PAPER=0 desliga; parâmetros em PAPER_* (veja src/paper.js).
+  paper: process.env.PAPER !== '0',
   dashUser: process.env.DASH_USER || 'admin',
   dashPassword: process.env.DASH_PASSWORD || '',
 };
